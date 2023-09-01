@@ -1,5 +1,27 @@
+export enum Validation {
+  Offline = 'Offline',
+  Online = 'Online',
+}
+
 export interface KeycloakOptions {
-  issuer: string; // The URL of the Keycloak server's issuer
-  clientId: string; // The client ID for your application
-  jwksUri: string; // The URI to retrieve the JSON Web Key Set for token verification
+  url: string;
+  realm: string;
+  clientId: string;
+  tokenValidation: Validation;
+}
+
+export interface KeycloakPathReturn {
+  issuer: string,
+  jwksUri: string,
+  rpt: string,
+  entitlement: string,
+}
+
+export function KeycloakPath(url: string, realm: string, clientId: string): KeycloakPathReturn {
+  return {
+    issuer: `${url}/auth/realms/${realm}`,
+    jwksUri: `${url}/auth/realms/${realm}/protocol/openid-connect/certs`,
+    rpt: `${url}/auth/realms/${realm}/protocol/openid-connect/token`,
+    entitlement: `${url}/auth/realms/${realm}/authz/entitlement/${clientId}`
+  }
 }

@@ -1,27 +1,62 @@
+import {CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException} from "@nestjs/common";
 import {KeycloakService} from "./keycloak.service";
-import {CanActivate, ExecutionContext, Injectable} from "@nestjs/common";
 import {Reflector} from "@nestjs/core";
-import {RESOURCES_KEY, ROLES_KEY, SCOPES_KEY} from "./keycloak.decorator";
+import {AUTH_KEY, RESOURCES_KEY, ROLES_KEY, SCOPES_KEY} from "./keycloak.decorator";
 
 @Injectable()
 export class KeycloakGuard implements CanActivate {
   constructor(
     private reflector: Reflector,
-    private keycloakService: KeycloakService,
+    private keycloakService: KeycloakService
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const roles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [context.getHandler(), context.getClass()]);
-    const scopes = this.reflector.getAllAndOverride<string[]>(SCOPES_KEY, [context.getHandler(), context.getClass()]);
-    const resources = this.reflector.getAllAndOverride<string[]>(RESOURCES_KEY, [context.getClass()]);
-    const request = context.switchToHttp().getRequest();
+    const auth = this.reflector.getAllAndOverride<string[]>(AUTH_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if(auth) {
+      const request = context.switchToHttp().getRequest();
+      const token = request.headers.authorization;
+      try {
+        await this.keycloakService.verifyToken(token);
+      } catch (error) {
+        throw new UnauthorizedException();
+      }
+    }
 
-    const token = request.headers.authorization;
-    const payload = await this.keycloakService.verifyToken(token);
+    const roles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (roles) {
+      const hasValidRoles = await this.keycloakService.validateRoles(token, roles);
+      if (!hasValidRoles) {
+        throw new ForbiddenException('Insufficient roles');
+      }
+    }
 
-    if (roles && !this.keycloakService.validateRoles(payload, roles)) return false;
-    if (scopes && !this.keycloakService.validateScopes(payload, scopes)) return false;
-    if (resources && !this.keycloakService.checkResources(payload, resources)) return false;
+    const resources = this.reflector.getAllAndOverride<string[]>(RESOURCES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (resources) {
+      const hasValidResources = await this.keycloakService.validateResources(token, resources);
+      if (!hasValidResources) {
+        throw new ForbiddenException('Insufficient resources');
+      }
+    }
+
+    const scopes = this.reflector.getAllAndOverride<string[]>(SCOPES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (scopes) {
+      const hasValidScopes = await this.keycloakService.validateScopes(token, scopes);
+      if (!hasValidScopes) {
+        throw new ForbiddenException('Insufficient scopes');
+      }
+    }
 
     return true;
   }
