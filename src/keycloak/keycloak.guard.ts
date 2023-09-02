@@ -6,7 +6,7 @@ import {AUTH_KEY, RESOURCES_KEY, ROLES_KEY, SCOPES_KEY} from "./keycloak.decorat
 @Injectable()
 export class KeycloakGuard implements CanActivate {
   constructor(
-    private reflector: Reflector,
+    private readonly reflector: Reflector,
     private keycloakService: KeycloakService
   ) {}
 
@@ -15,14 +15,15 @@ export class KeycloakGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    const request = context.switchToHttp().getRequest();
+    const token = request.headers.authorization;
+
     if(auth) {
-      const request = context.switchToHttp().getRequest();
-      const token = request.headers.authorization;
-      try {
-        await this.keycloakService.verifyToken(token);
-      } catch (error) {
-        throw new UnauthorizedException();
-      }
+        try {
+          await this.keycloakService.verifyToken(token);
+        } catch (error) {
+          throw new UnauthorizedException();
+        }
     }
 
     const roles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [

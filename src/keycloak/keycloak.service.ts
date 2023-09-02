@@ -1,7 +1,8 @@
 import {Inject, Injectable, UnauthorizedException} from '@nestjs/common';
 import {KeycloakOptions, KeycloakPath, KeycloakPathReturn, Validation} from './keycloak.options';
-import fetch from 'node-fetch';
-import {JWK, jwtVerify, JWTVerifyResult, KeyLike} from 'jose';
+import {jwtVerify, KeyLike} from 'jose';
+import fetch from 'isomorphic-fetch';
+
 
 @Injectable()
 export class KeycloakService {
@@ -23,22 +24,26 @@ export class KeycloakService {
     if (!response.ok) {
       throw new UnauthorizedException('Failed to fetch JWKS');
     }
-    const jwks = await response.json();
+    const jwks = await response.json() as any;
     const keyObj = jwks.keys.find((key: { kid: string }) => key.kid === kid);
     if (!keyObj) {
       throw new UnauthorizedException('Key not found');
     }
-    const key = JWK.asKey(keyObj);
+    const key = jwks.keys.find((key: { kid: string }) => key.kid === kid);
     this.keyCache[kid] = {key, expireAt: now + (expiresIn * 1000)};
     return key;
   }
 
-  async verifyToken(token: string): Promise<JWTVerifyResult> {
+  async verifyToken(token: string): Promise<any> {
     const headerBase64 = token.split('.')[0];
     const headerJson = Buffer.from(headerBase64, 'base64').toString('utf-8');
     const {kid, expires_in} = JSON.parse(headerJson);
-
-    const key = await this.getKey(kid, expires_in);
+    let key;
+    if(this.options.secret) {
+      key = new TextEncoder().encode(this.options.secret);
+    } else {
+      key = await this.getKey(kid, expires_in);
+    }
     try {
       return await jwtVerify(token, key, {
         issuer: this.keyCloakPath.issuer,
@@ -59,16 +64,15 @@ export class KeycloakService {
   }
 
   async validateRoles(token: string, requiredRoles: string[]): Promise<boolean> {
-    const payload = await this.verifyToken(token);
-    const roles = payload.realm_access?.roles || [];
+    const {payload} = await this.verifyToken(token);
+    const roles = payload.realm_access.role;
     return requiredRoles.every(role => roles.includes(role));
   }
 
   private async validateScopesOnline(token: string, scopes: string[]): Promise<boolean> {
     const rpt = await this.getRPT(token);
-    const rptPayload = await this.verifyToken(rpt);
-    const permissions = rptPayload.authorization?.permissions || [];
-    const permissionScopes = permissions.map(p => p.scopes).flat();
+    const {payload} = await this.verifyToken(rpt);
+    const permissionScopes = payload.authorization?.permissions?.map(p => p.scopes).flat();
     return scopes.every(scope => permissionScopes.includes(scope));
   }
 
@@ -96,10 +100,13 @@ export class KeycloakService {
       'Authorization': `Bearer ${rptToken}`,
     };
     const response = await fetch(this.keyCloakPath.entitlement, {method: 'GET', headers});
-    const data = await response.json();
+    const data = await response.json() as any;
 
-    const permissions = data.authorization?.permissions || [];
-    return requiredResources.every(resource => permissions.some(p => p.rsid === resource));
+    const permissions = data.authorization?.permissions;
+    if(permissions) {
+      return requiredResources.every(resource => permissions.some(p => p.rsid === resource));
+    }
+    return false;
   }
 
 
@@ -112,7 +119,7 @@ export class KeycloakService {
     const params = new URLSearchParams();
     params.append('grant_type', 'urn:ietf:params:oauth:grant-type:uma-ticket');
     const response = await fetch(this.keyCloakPath.rpt, {method: 'POST', headers, body: params});
-    const data = await response.json();
-    return data.rpt;
+    const data = await response.json() as {rpt: any};
+    return data.rpt
   }
 }

@@ -8,6 +8,7 @@ export interface KeycloakOptions {
   realm: string;
   clientId: string;
   tokenValidation: Validation;
+  secret?: string,
 }
 
 export interface KeycloakPathReturn {
